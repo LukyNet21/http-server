@@ -1,4 +1,5 @@
 #include "server.h"
+#include "http.h"
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -81,33 +82,26 @@ void *client_connection(void *args)
 {
   int client_fd = *((int *)args);
   char buff[100];
-  char reply[200];
-  char *msg = "[CLIENT SENT]";
   ssize_t bytes_read;
 
-  while (1)
+  memset(buff, 0, sizeof(buff));
+
+  bytes_read = read(client_fd, buff, sizeof(buff) - 1);
+  if (bytes_read <= 0)
   {
-    memset(buff, 0, sizeof(buff));
-
-    bytes_read = read(client_fd, buff, sizeof(buff) - 1);
-    if (bytes_read <= 0)
-    {
-      printf("Client disconnected or error occurred\n");
-      break;
-    }
-
-    buff[bytes_read] = '\0';
-    printf("Message from client: %s", buff);
-
-    snprintf(reply, sizeof(reply), "%s %s", msg, buff);
-    write(client_fd, reply, strlen(reply));
-
-    if (strncmp(buff, "bye", 3) == 0)
-    {
-      printf("Client said bye, closing connection\n");
-      break;
-    }
+    printf("Client disconnected or error occurred\n");
+    close(client_fd);
+    return NULL;
   }
+
+  header headers[] = {};
+
+  buff[bytes_read] = '\0';
+  printf("Message from client: %s", buff);
+
+  char *response = build_http_respones(200, "text/plain", headers, 0, "Hello, World!!!!!");
+  write(client_fd, response, strlen(response));
+  free(response);
 
   close(client_fd);
   return NULL;
