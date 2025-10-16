@@ -1,0 +1,5 @@
+# Env files
+.env
+.vscode/
+# C objects
+*.o
