@@ -8,6 +8,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <stdint.h>
 
 int new_server(int port)
 {
@@ -68,13 +70,16 @@ void connection_loop(int server_fd)
     char *client_ip = inet_ntoa(client_addr.sin_addr);
     int client_port = ntohs(client_addr.sin_port);
     printf("connection accepted from client %s:%d\n", client_ip, client_port);
-    
-    client_connection(conn_fd);
+
+    pthread_t thread;
+    pthread_create(&thread, NULL, client_connection, (void *)&conn_fd);
+    pthread_detach(thread);
   }
 }
 
-void client_connection(int client_fd)
+void *client_connection(void *args)
 {
+  int client_fd = *((int *)args);
   char buff[100];
   char reply[200];
   char *msg = "[CLIENT SENT]";
@@ -105,4 +110,5 @@ void client_connection(int client_fd)
   }
 
   close(client_fd);
+  return NULL;
 }
