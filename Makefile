@@ -6,8 +6,8 @@ BUILDDIR=build
 
 all: $(BUILDDIR)/$(TARGET)
 
-$(BUILDDIR)/$(TARGET): $(BUILDDIR)/main.o $(BUILDDIR)/server.o $(BUILDDIR)/http.o | $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $(BUILDDIR)/$(TARGET) $(BUILDDIR)/main.o $(BUILDDIR)/server.o $(BUILDDIR)/http.o
+$(BUILDDIR)/$(TARGET): $(BUILDDIR)/main.o $(BUILDDIR)/server.o $(BUILDDIR)/http.o $(BUILDDIR)/parsing.o | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $(BUILDDIR)/$(TARGET) $(BUILDDIR)/main.o $(BUILDDIR)/server.o $(BUILDDIR)/http.o $(BUILDDIR)/parsing.o
 
 $(BUILDDIR)/main.o: main.c $(SRCDIR)/server.h $(SRCDIR)/http.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c main.c -o $(BUILDDIR)/main.o
@@ -17,6 +17,9 @@ $(BUILDDIR)/server.o: $(SRCDIR)/server.c $(SRCDIR)/server.h $(SRCDIR)/http.h | $
 
 $(BUILDDIR)/http.o: $(SRCDIR)/http.c $(SRCDIR)/http.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $(SRCDIR)/http.c -o $(BUILDDIR)/http.o
+
+$(BUILDDIR)/parsing.o: $(SRCDIR)/parsing.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $(SRCDIR)/parsing.c -o $(BUILDDIR)/parsing.o
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)

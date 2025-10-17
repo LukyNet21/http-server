@@ -1,25 +1,26 @@
 #include "server.h"
 #include "http.h"
+
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <pthread.h>
-#include <stdint.h>
 
-int new_server(int port)
-{
+
+int new_server(int port) {
   int server_fd;
   struct sockaddr_in server_addr;
 
   // create server socket
-  if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-  {
+  if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     perror("socket failed");
     exit(EXIT_FAILURE);
   }
@@ -32,16 +33,14 @@ int new_server(int port)
 
   // bind socket to port
   if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) <
-      0)
-  {
+      0) {
     perror("bind failed");
     exit(EXIT_FAILURE);
   }
   printf("socket binded to port %d\n", port);
 
   // listen for connections
-  if (listen(server_fd, 10) < 0)
-  {
+  if (listen(server_fd, 10) < 0) {
     perror("listen failed");
     exit(EXIT_FAILURE);
   }
@@ -50,10 +49,8 @@ int new_server(int port)
   return server_fd;
 }
 
-void connection_loop(int server_fd)
-{
-  while (1)
-  {
+void connection_loop(int server_fd) {
+  while (1) {
     // accept connection
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
@@ -62,8 +59,7 @@ void connection_loop(int server_fd)
     printf("waiting for connections...\n");
 
     if ((conn_fd = accept(server_fd, (struct sockaddr *)&client_addr,
-                          &client_len)) < 0)
-    {
+                          &client_len)) < 0) {
       perror("accept failed");
       exit(EXIT_FAILURE);
     }
@@ -78,31 +74,113 @@ void connection_loop(int server_fd)
   }
 }
 
-void *client_connection(void *args)
-{
+void *client_connection(void *args) {
   int client_fd = *((int *)args);
-  char buff[100];
-  ssize_t bytes_read;
 
-  memset(buff, 0, sizeof(buff));
+  http_request req = read_http_request(client_fd);
+  http_request_debug_print(&req);
 
-  bytes_read = read(client_fd, buff, sizeof(buff) - 1);
-  if (bytes_read <= 0)
-  {
-    printf("Client disconnected or error occurred\n");
-    close(client_fd);
-    return NULL;
-  }
-
-  header headers[] = {};
-
-  buff[bytes_read] = '\0';
-  printf("Message from client: %s", buff);
-
-  char *response = build_http_respones(200, "text/plain", headers, 0, "Hello, World!!!!!");
+  char *response =
+      build_http_respones(200, "text/plain", NULL, 0, "Hello, World!!!!!");
   write(client_fd, response, strlen(response));
   free(response);
+  http_request_free(&req);
 
   close(client_fd);
   return NULL;
+}
+
+http_request read_http_request(int client_fd) {
+  http_request req;
+  memset(&req, 0, sizeof(req));
+  req.method = HTTP_METHOD_UNKNOWN;
+
+  size_t cap = 8192;
+  size_t len = 0;
+  char *buff = (char *)malloc(cap + 1);
+  if (!buff) {
+    return req;
+  }
+
+  ssize_t header_end = -1;
+
+  while (1) {
+    if (cap - len < 1024) {
+      size_t new_cap = cap * 2;
+      char *nb = (char *)realloc(buff, new_cap + 1);
+      if (!nb) {
+        break;
+      }
+      buff = nb;
+      cap = new_cap;
+    }
+
+    ssize_t n = read(client_fd, buff + len, cap - len);
+    if (n <= 0) {
+      break;
+    }
+    len += (size_t)n;
+    buff[len] = '\0';
+
+    if (header_end < 0) {
+      for (size_t i = 0; header_end < 0 && i + 3 < len; i++) {
+        if (buff[i] == '\r' && buff[i + 1] == '\n' && buff[i + 2] == '\r' &&
+            buff[i + 3] == '\n') {
+          header_end = (ssize_t)(i + 4);
+        }
+      }
+    }
+
+    if (header_end > 0) {
+      break;
+    }
+  }
+
+  size_t bytes_read = len;
+  if (!buff || bytes_read == 0) {
+    free(buff);
+    return req;
+  }
+
+  buff[bytes_read] = '\0';
+  req = parse_http_request_headers(buff);
+
+  int skip_body =
+      (req.method == HTTP_METHOD_GET || req.method == HTTP_METHOD_HEAD);
+  size_t need_body = skip_body ? 0 : req.content_length;
+
+  if (header_end > 0 && !skip_body && need_body > 0) {
+    size_t have = bytes_read - (size_t)header_end;
+    if (have < need_body) {
+      size_t needed_total = (size_t)header_end + need_body;
+      if (cap < needed_total + 1) {
+        size_t new_cap = needed_total * 2;
+        char *nb = (char *)realloc(buff, new_cap + 1);
+        if (nb) {
+          buff = nb;
+          cap = new_cap;
+        }
+      }
+      while (have < need_body) {
+        ssize_t n =
+            read(client_fd, buff + (size_t)header_end + have, need_body - have);
+        if (n <= 0)
+          break;
+        have += (size_t)n;
+      }
+      bytes_read = (size_t)header_end + have;
+      buff[bytes_read] = '\0';
+    }
+
+    if (need_body > 0) {
+      req.body = (char *)malloc(need_body + 1);
+      if (req.body) {
+        memcpy(req.body, buff + (size_t)header_end, need_body);
+        req.body[need_body] = '\0';
+        req.content_length = need_body;
+      }
+    }
+  }
+  free(buff);
+  return req;
 }
