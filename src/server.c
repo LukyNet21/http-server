@@ -11,9 +11,9 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
-
 
 int new_server(int port) {
   int server_fd;
@@ -77,14 +77,46 @@ void connection_loop(int server_fd) {
 void *client_connection(void *args) {
   int client_fd = *((int *)args);
 
-  http_request req = read_http_request(client_fd);
-  http_request_debug_print(&req);
+  struct timeval tv;
+  tv.tv_sec = 5;
+  tv.tv_usec = 0;
+  setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-  char *response =
-      build_http_respones(200, "text/plain", NULL, 0, "Hello, World!!!!!");
-  write(client_fd, response, strlen(response));
-  free(response);
-  http_request_free(&req);
+  const int max_requests = 100;
+  for (int i = 0; i < max_requests; i++) {
+    http_request req = read_http_request(client_fd);
+
+    if (!req.method_str && req.headers.headers_count == 0) {
+      http_request_free(&req);
+      break;
+    }
+
+    http_request_debug_print(&req);
+
+    header resp_headers[2];
+    size_t rhc = 0;
+    resp_headers[rhc].key = "Connection";
+    resp_headers[rhc].value = req.keep_alive ? "keep-alive" : "close";
+    rhc++;
+    if (req.keep_alive) {
+      resp_headers[rhc].key = "Keep-Alive";
+      resp_headers[rhc].value = "timeout=5, max=100";
+      rhc++;
+    }
+
+    char *response = build_http_respones(200, "text/plain", resp_headers, rhc,
+                                         "Hello, World!!!!!");
+    if (response) {
+      write(client_fd, response, strlen(response));
+      free(response);
+    }
+
+    int keep = req.keep_alive;
+    http_request_free(&req);
+    if (!keep) {
+      break;
+    }
+  }
 
   close(client_fd);
   return NULL;
